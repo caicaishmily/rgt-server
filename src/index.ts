@@ -9,11 +9,10 @@ import mikroConfig from './mikro-orm.config'
 import { HelloResolver } from "./resolvers/hello"
 import { PostResolver } from "./resolvers/post"
 import { UserResolver } from "./resolvers/user"
-
+import cors from "cors"
 import redis from 'redis'
 import session from 'express-session'
 import connectRedis from "connect-redis"
-import { MyContext } from "./types"
 
 const main = async () => {
   const orm = await MikroORM.init(mikroConfig)
@@ -46,19 +45,26 @@ const main = async () => {
     })
   )
 
+  app.use(
+    cors({
+      origin: "http://localhost:3000",
+      credentials: true
+    })
+  )
+
   const apolloServer = new ApolloServer({
     schema: await buildSchema({
       resolvers: [HelloResolver, PostResolver, UserResolver],
       validate: false
     }),
-    context: ({ req, res }): MyContext => <MyContext>({ em: orm.em, req, res })
+    context: ({ req, res }) => ({ em: orm.em, req, res })
   })
 
   // app.get('/', (_, res) => {
   //   res.send("Hello")
   // })
 
-  apolloServer.applyMiddleware({ app })
+  apolloServer.applyMiddleware({ app, cors: false })
 
   app.listen(4000, () => {
     console.log("server is run localhost:4000")
