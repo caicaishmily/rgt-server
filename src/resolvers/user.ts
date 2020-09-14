@@ -1,103 +1,116 @@
-import { Resolver, Mutation, Arg, InputType, Field, Ctx, ObjectType, Query } from "type-graphql";
+import {
+  Resolver,
+  Mutation,
+  Arg,
+  Field,
+  Ctx,
+  ObjectType,
+  Query,
+} from "type-graphql";
 import { MyContext } from "../types";
 import { User } from "../entities/User";
 import argon2 from "argon2";
-import { EntityManager } from "@mikro-orm/postgresql"
-import { COOKIE_NAME } from "../constants";
-
-@InputType()
-class UserInput {
-  @Field()
-  username: string;
-
-  @Field()
-  password: string;
-}
+import { EntityManager } from "@mikro-orm/postgresql";
+import { COOKIE_NAME, FORGET_PASSWORD_PREFIX } from "../constants";
+import { UserInput } from "./UserInput";
+import { validateRegister } from "../utils/validateRegister";
+import { sendEmail } from "../utils/sendEmail";
+import { v4 } from "uuid"
 
 @ObjectType()
 class FieldError {
   @Field()
-  field: string
+  field: string;
 
   @Field()
-  message: string
+  message: string;
 }
 
 @ObjectType()
 class UserResponse {
-  @Field(() => [FieldError], {nullable: true})
-  errors?: FieldError[]
+  @Field(() => [FieldError], { nullable: true })
+  errors?: FieldError[];
 
-  @Field(() => User, {nullable: true})
-  user?: User
+  @Field(() => User, { nullable: true })
+  user?: User;
 }
 
 @Resolver()
 export class UserResolver {
-  @Query(() => User, {nullable: true})
-  async me(@Ctx() {em, req}: MyContext) {
-    if(!req.session.userId) {
-      return null
+  @Query(() => User, { nullable: true })
+  async me(@Ctx() { em, req }: MyContext) {
+    if (!req.session.userId) {
+      return null;
     }
 
-    const user = await em.findOne(User, {id: req.session.userId})
+    const user = await em.findOne(User, { id: req.session.userId });
 
-    return user
+    return user;
+  }
+
+  @Mutation(() => Boolean)
+  async forgotPassword(@Ctx() {em, redis}: MyContext, @Arg("email") email: string)
+  {
+    const user = await em.findOne(User, { email })
+    
+    if(!user) {
+      return true
+    }
+
+    const token = v4()
+    await redis.set(FORGET_PASSWORD_PREFIX + token, user.id, "ex", 1000 * 60 * 60 * 24 * 3)
+
+    await sendEmail(email, `<a href="http://localhost:3000/change-password/${token}">reset password</a>`)
+
+    return true;
+    // if(user)
   }
 
   @Mutation(() => Boolean)
   logout(@Ctx() { req, res }: MyContext) {
-    return new Promise((resolve) => 
-      req.session.destroy(error => {
-        res.clearCookie(COOKIE_NAME)
-        
+    return new Promise((resolve) =>
+      req.session.destroy((error) => {
+        res.clearCookie(COOKIE_NAME);
+
         if (error) {
-          console.log(error)
-          resolve(false)
-          return 
+          console.log(error);
+          resolve(false);
+          return;
         }
 
-        resolve(true)
+        resolve(true);
       })
-    )
+    );
   }
 
   @Mutation(() => UserResponse)
-  async register(@Arg("options") options: UserInput, @Ctx() { em, req }: MyContext): Promise<UserResponse> {
-    if (options.username.length <= 2) {
-      return {
-        errors: [
-          {
-            field: "username",
-            message: "length must be greater than 2",
-          },
-        ],
-      };
-    }
+  async register(
+    @Arg("options") options: UserInput,
+    @Ctx() { em, req }: MyContext
+  ): Promise<UserResponse> {
+    const validateErrors = validateRegister(options);
 
-    if (options.password.length <= 2) {
-      return {
-        errors: [
-          {
-            field: "password",
-            message: "length must be greater than 2",
-          },
-        ],
-      };
+    if (validateErrors) {
+      return validateErrors;
     }
 
     const hashedPassword = await argon2.hash(options.password);
-    let user
+    let user;
     try {
-      const result = await(em as EntityManager).createQueryBuilder(User).getKnexQuery().insert({
-        username: options.username,
-        password: hashedPassword,
-        created_at: new Date(),
-        updated_at: new Date()
-      }).returning('*')
+      const result = await (em as EntityManager)
+        .createQueryBuilder(User)
+        .getKnexQuery()
+        .insert({
+          username: options.username,
+          email: options.email,
+          password: hashedPassword,
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+        .returning("*");
 
-      user = result[0]
-    } catch(err) {
+      user = result[0];
+    } catch (err) {
       if (err.code === "23505") {
         //|| err.detail.includes("already exists")) {
         // duplicate username error
@@ -112,40 +125,49 @@ export class UserResolver {
       }
     }
 
-    req.session.userId = user.id
+    req.session.userId = user.id;
 
-    return {user};
+    return { user };
   }
 
   @Mutation(() => UserResponse)
-  async login(@Arg("options") options: UserInput, @Ctx() { em, req }: MyContext): Promise<UserResponse> {
-    const user = await em.findOne(User, {username: options.username})
+  async login(
+    @Arg("usernameOrEmail") usernameOrEmail: string,
+    @Arg("password") password: string,
+    @Ctx() { em, req }: MyContext
+  ): Promise<UserResponse> {
+    const user = await em.findOne(
+      User,
+      usernameOrEmail.includes("@")
+        ? { email: usernameOrEmail }
+        : { username: usernameOrEmail }
+    );
 
-    if(!user) {
+    if (!user) {
       return {
         errors: [
           {
-            field: "username",
-            message: "thst username doesn't exist",
-          }
-        ]
-      }
+            field: "usernameOrEmail",
+            message: "that username doesn't exist",
+          },
+        ],
+      };
     }
 
-    const valid = await argon2.verify(user.password, options.password);
-    
-    if(!valid) {
+    const valid = await argon2.verify(user.password, password);
+
+    if (!valid) {
       return {
         errors: [
           {
             field: "password",
             message: "incorrect password",
-          }
-        ]
-      }
+          },
+        ],
+      };
     }
 
-    req.session.userId = user.id
+    req.session.userId = user.id;
 
     return { user };
   }
