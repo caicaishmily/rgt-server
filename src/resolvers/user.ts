@@ -15,7 +15,7 @@ import { COOKIE_NAME, FORGET_PASSWORD_PREFIX } from "../constants";
 import { UserInput } from "./UserInput";
 import { validateRegister } from "../utils/validateRegister";
 import { sendEmail } from "../utils/sendEmail";
-import { v4 } from "uuid"
+import { v4 } from "uuid";
 
 @ObjectType()
 class FieldError {
@@ -49,21 +49,83 @@ export class UserResolver {
   }
 
   @Mutation(() => Boolean)
-  async forgotPassword(@Ctx() {em, redis}: MyContext, @Arg("email") email: string)
-  {
-    const user = await em.findOne(User, { email })
-    
-    if(!user) {
-      return true
+  async forgotPassword(
+    @Ctx() { em, redis }: MyContext,
+    @Arg("email") email: string
+  ) {
+    const user = await em.findOne(User, { email });
+
+    if (!user) {
+      return true;
     }
 
-    const token = v4()
-    await redis.set(FORGET_PASSWORD_PREFIX + token, user.id, "ex", 1000 * 60 * 60 * 24 * 3)
+    const token = v4();
+    await redis.set(
+      FORGET_PASSWORD_PREFIX + token,
+      user.id,
+      "ex",
+      1000 * 60 * 60 * 24 * 3
+    );
 
-    await sendEmail(email, `<a href="http://localhost:3000/change-password/${token}">reset password</a>`)
+    await sendEmail(
+      email,
+      `<a href="http://localhost:3000/change-password/${token}">reset password</a>`
+    );
 
     return true;
     // if(user)
+  }
+
+  @Mutation(() => UserResponse)
+  async changePassword(
+    @Ctx() { req, em, redis }: MyContext,
+    @Arg("token") token: string,
+    @Arg("newPassword") newPassword: string
+  ): Promise<UserResponse> {
+    if (newPassword.length <= 2) {
+      return {
+        errors: [
+          {
+            field: "newPassword",
+            message: "length must be greater than 2",
+          },
+        ],
+      };
+    }
+
+    const userId = await redis.get(FORGET_PASSWORD_PREFIX + token);
+
+    if (!userId) {
+      return {
+        errors: [
+          {
+            field: "token",
+            message: "token expired",
+          },
+        ],
+      };
+    }
+
+    const user = await em.findOne(User, { id: parseInt(userId) });
+
+    if (!user) {
+      return {
+        errors: [
+          {
+            field: "token",
+            message: "user no longer exists",
+          },
+        ],
+      };
+    }
+
+    user.password = await argon2.hash(newPassword);
+
+    await em.persistAndFlush(user);
+
+    req.session.userId = user.id
+
+    return { user };
   }
 
   @Mutation(() => Boolean)
