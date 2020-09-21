@@ -1,28 +1,31 @@
 import "reflect-metadata"
-import { MikroORM } from "@mikro-orm/core"
 import express from "express"
 import { ApolloServer } from "apollo-server-express"
 import { buildSchema } from "type-graphql"
-
-import { __prod__, COOKIE_NAME } from './constants'
-import mikroConfig from './mikro-orm.config'
-import { HelloResolver } from "./resolvers/hello"
-import { PostResolver } from "./resolvers/post"
-import { UserResolver } from "./resolvers/user"
 import cors from "cors"
 import Redis from 'ioredis'
 import session from 'express-session'
 import connectRedis from "connect-redis"
+import { createConnection } from "typeorm"
+
+import { __prod__, COOKIE_NAME } from './constants'
+import { HelloResolver } from "./resolvers/hello"
+import { PostResolver } from "./resolvers/post"
+import { UserResolver } from "./resolvers/user"
+import { Post } from "./entities/Post"
+import { User } from "./entities/User"
 
 const main = async () => {
-  const orm = await MikroORM.init(mikroConfig)
-  await orm.getMigrator().up()
-  // const post = orm.em.create(Post, {title: "first post"})
-  // await orm.em.persistAndFlush(post)
-
-  // const posts = await orm.em.find(Post, {id: 3})
-
-  // console.log(posts)
+  // const conn = await createConnection({
+  await createConnection({
+    type: "postgres",
+    database: "rgt2",
+    username: "postgres",
+    password: "postgres",
+    logging: true,
+    synchronize: true,
+    entities: [User, Post]
+  })
 
   const app = express()
 
@@ -57,7 +60,7 @@ const main = async () => {
       resolvers: [HelloResolver, PostResolver, UserResolver],
       validate: false
     }),
-    context: ({ req, res }) => ({ em: orm.em, req, res, redis })
+    context: ({ req, res }) => ({ req, res, redis })
   })
 
   // app.get('/', (_, res) => {
