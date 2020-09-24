@@ -7,6 +7,7 @@ import Redis from 'ioredis'
 import session from 'express-session'
 import connectRedis from "connect-redis"
 import { createConnection } from "typeorm"
+import path from "path"
 
 import { __prod__, COOKIE_NAME } from './constants'
 import { HelloResolver } from "./resolvers/hello"
@@ -16,16 +17,18 @@ import { Post } from "./entities/Post"
 import { User } from "./entities/User"
 
 const main = async () => {
-  // const conn = await createConnection({
-  await createConnection({
+  const conn = await createConnection({
     type: "postgres",
     database: "rgt2",
     username: "postgres",
     password: "postgres",
     logging: true,
     synchronize: true,
+    migrations: [path.join(__dirname, "./migrations/*")],
     entities: [User, Post]
   })
+
+  conn.runMigrations()
 
   const app = express()
 
