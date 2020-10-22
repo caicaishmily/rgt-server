@@ -67,14 +67,14 @@ export class PostResolver {
     const replacements: any[] = [reaLimitPlusOne];
 
     if (req.session.userId) {
-      replacements.push(req.session.userId)
+      replacements.push(req.session.userId);
     }
 
-    let cursorIdx = 3
+    let cursorIdx = 3;
 
     if (cursor) {
       replacements.push(new Date(parseInt(cursor)));
-      cursorIdx = replacements.length
+      cursorIdx = replacements.length;
     }
 
     const posts = await getConnection().query(
@@ -88,8 +88,8 @@ export class PostResolver {
         'updatedAt', u."updatedAt"
       ) creator,
       ${
-        req.session.userId 
-          ? '(select value from updoot where "userId" = $2 and "postId" = p.id) "voteStatus"' 
+        req.session.userId
+          ? '(select value from updoot where "userId" = $2 and "postId" = p.id) "voteStatus"'
           : 'null as "voteStatus"'
       }
       from post p
@@ -145,8 +145,28 @@ export class PostResolver {
   }
 
   @Mutation(() => Boolean)
-  async deletePost(@Arg("id") id: number): Promise<boolean> {
-    await Post.delete(id);
+  @UseMiddleware(isAuth)
+  async deletePost(
+    @Arg("id", () => Int) id: number,
+    @Ctx() { req }: MyContext
+  ): Promise<boolean> {
+
+    // one way not cascade
+    const post = await Post.findOne({ id })
+
+    if(!post) {
+      return false
+    }
+
+    if(post.creatorId !== req.session.userId) {
+      throw new Error("not authorized")
+    }
+
+    await Updoot.delete({ postId: id })
+    await Post.delete(id)
+
+    // another cascade way 
+    // await Post.delete({id, creatorId: req.session.userId});
     return true;
   }
 
