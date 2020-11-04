@@ -1,4 +1,5 @@
 import "reflect-metadata"
+import "dotenv-safe/config"
 import express from "express"
 import { ApolloServer } from "apollo-server-express"
 import { buildSchema } from "type-graphql"
@@ -22,9 +23,7 @@ import { createUpdootLoader } from "./utils/createUpdootLoader"
 const main = async () => {
   const conn = await createConnection({
     type: "postgres",
-    database: "rgt2",
-    username: "postgres",
-    password: "postgres",
+    url: process.env.DATABASE_URL,
     logging: true,
     synchronize: true,
     migrations: [path.join(__dirname, "./migrations/*")],
@@ -36,7 +35,7 @@ const main = async () => {
   const app = express()
 
   const RedisStore = connectRedis(session)
-  const redis = new Redis()
+  const redis = new Redis(process.env.REDIS_URL)
   
   app.use(
     session({
@@ -46,17 +45,19 @@ const main = async () => {
         maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         httpOnly: true,
         sameSite: "lax", // csrf
-        secure: __prod__ // cookie only works in https
+        secure: __prod__, // cookie only works in https
+        // FIXME
+        domain: __prod__ ? ".codeponder.com" : undefined
       },
       saveUninitialized: false,
-      secret: 'qwertyuiop',
+      secret: process.env.SESSION_SECRET,
       resave: false,
     })
   )
 
   app.use(
     cors({
-      origin: "http://localhost:3000",
+      origin: process.env.CORS_ORIGIN,
       credentials: true
     })
   )
@@ -75,7 +76,7 @@ const main = async () => {
 
   apolloServer.applyMiddleware({ app, cors: false })
 
-  app.listen(4000, () => {
+  app.listen(parseInt(process.env.PORT), () => {
     console.log("server is run localhost:4000")
   })
 }
