@@ -25,7 +25,7 @@ const main = async () => {
     type: "postgres",
     url: process.env.DATABASE_URL,
     logging: true,
-    synchronize: true,
+    // synchronize: true,
     migrations: [path.join(__dirname, "./migrations/*")],
     entities: [User, Post, Updoot]
   })
@@ -36,7 +36,7 @@ const main = async () => {
 
   const RedisStore = connectRedis(session)
   const redis = new Redis(process.env.REDIS_URL)
-  
+  app.set("proxy", 1)
   app.use(
     session({
       name: COOKIE_NAME,
@@ -69,10 +69,6 @@ const main = async () => {
     }),
     context: ({ req, res }) => ({ req, res, redis, userLoader: createUserLoader(), updootLoader: createUpdootLoader()})
   })
-
-  // app.get('/', (_, res) => {
-  //   res.send("Hello")
-  // })
 
   apolloServer.applyMiddleware({ app, cors: false })
 
